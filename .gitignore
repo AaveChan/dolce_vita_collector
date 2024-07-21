@@ -1,12 +1,15 @@
-# Environment variables
-.env
-
-# Foundry build artifacts
+# Foundry
 cache/
 out/
 
 # Logs
 logs/
+
+# Broadcast
+broadcast/
+
+# Dotenv file
+.env
 
 # Node modules (if you're using any npm packages)
 node_modules/
@@ -23,3 +26,11 @@ node_modules/
 # Temporary files
 *.tmp
 *.temp
+
+# Hardhat files (if you're also using Hardhat)
+artifacts/
+cache_hardhat/
+
+# Misc
+*.log
+*.bak
