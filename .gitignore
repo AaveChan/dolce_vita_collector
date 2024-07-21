@@ -1,14 +1,25 @@
-# Compiler files
+# Environment variables
+.env
+
+# Foundry build artifacts
 cache/
 out/
 
-# Ignores development broadcast logs
-!/broadcast
-/broadcast/*/31337/
-/broadcast/**/dry-run/
+# Logs
+logs/
 
-# Docs
-docs/
+# Node modules (if you're using any npm packages)
+node_modules/
 
-# Dotenv file
-.env
+# MacOS system files
+.DS_Store
+
+# Editor files
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.temp

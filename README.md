@@ -1,66 +1,48 @@
-## Foundry
+# ACI's Dolce Vita Collector
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+This project automates the process of minting to treasury for various Aave Pools across multiple networks.
 
-Foundry consists of:
+## Setup
 
--   **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
--   **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
--   **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
--   **Chisel**: Fast, utilitarian, and verbose solidity REPL.
+1. Clone the repository:
+   ```
+   git clone https://github.com/yourusername/dolce_vita_collector.git
+   cd dolce_vita_collector
+   ```
 
-## Documentation
+2. Install Foundry if you haven't already:
+   ```
+   curl -L https://foundry.paradigm.xyz | bash
+   foundryup
+   ```
 
-https://book.getfoundry.sh/
+3. Copy `.env.example` to `.env` and fill in your private key and any other necessary details:
+   ```
+   cp .env.example .env
+   ```
+
+4. Build the project:
+   ```
+   forge build
+   ```
 
 ## Usage
 
-### Build
+- To fetch reserves for all networks:
+  ```
+  make fetch-reserves
+  ```
 
-```shell
-$ forge build
-```
+- To mint to treasury for a specific network and pool:
+  ```
+  make mint-to-treasury NETWORK=MAINNET POOL=MAIN
+  ```
 
-### Test
+- To run the entire process (fetch reserves and mint for all networks):
+  ```
+  make run-all
+  ```
 
-```shell
-$ forge test
-```
+## License
 
-### Format
-
-```shell
-$ forge fmt
-```
-
-### Gas Snapshots
-
-```shell
-$ forge snapshot
-```
-
-### Anvil
-
-```shell
-$ anvil
-```
-
-### Deploy
-
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+This project is licensed under the MIT License.
