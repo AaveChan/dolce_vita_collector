@@ -33,4 +33,4 @@ cache_hardhat/
 
 # Misc
 *.log
-*.bak
+*.bak.env
