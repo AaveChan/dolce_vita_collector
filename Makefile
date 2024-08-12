@@ -30,24 +30,13 @@ fetch-reserves: $(LOG_DIR)
 	@echo "Fetching reserves list for all networks..."
 	@forge script ${FETCH_RESERVES_SCRIPT} -vvvv
 
-mint-to-treasury: $(LOG_DIR)
-	@echo "Minting to treasury on ${NETWORK}..."
-	@timeout $(TIMEOUT) bash -c "\
-		RESERVES=\$$(cat $(LOG_DIR)/reserves.json); \
-		NETWORK=${NETWORK} forge script ${MINT_TO_TREASURY_SCRIPT} \
-			--sig \"run(string)\" \"\$$RESERVES\" \
-			--rpc-url ${RPC_${NETWORK}} \
-			${PRIVATE_KEY_ARG} \
-			${EXTRA_ARGS}" \
-	|| echo "Transaction for ${NETWORK} timed out after $(TIMEOUT) seconds. Skipping to next network."
-
-run-all: fetch-reserves
-	@echo "Running mint-to-treasury for all networks with reserves..."
-	@NETWORKS=$$(jq -r 'keys[]' $(LOG_DIR)/reserves.json); \
-	for network in $$NETWORKS; do \
-		echo "Processing $$network"; \
-		$(MAKE) mint-to-treasury NETWORK=$$network || true; \
-	done
+mint:
+	@if [ -z "$(NETWORK)" ]; then \
+		echo "Error: NETWORK is not set. Use 'make mint NETWORK=<network_name>' or set NETWORK in .env file."; \
+		exit 1; \
+	fi
+	@echo "Minting for network: $(NETWORK)"
+	TARGET_NETWORK=$(NETWORK) forge script script/MintToTreasury.s.sol:MintToTreasuryScript --broadcast
 
 clean:
 	@rm -rf $(LOG_DIR) broadcast cache out

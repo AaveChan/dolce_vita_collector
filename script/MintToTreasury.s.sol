@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.13;
 
 import "forge-std/Script.sol";
 import "forge-std/console.sol";
@@ -9,54 +9,81 @@ interface IPool {
 }
 
 contract MintToTreasuryScript is Script {
-    function setUp() public {}
+    mapping(string => address) pools;
+    mapping(string => string) rpcUrls;
+    string[] networkNames = [
+        "MAINNET", "AVALANCHE", "OPTIMISM", "POLYGON", 
+        "ARBITRUM", "METIS", "BASE", "GNOSIS", "BNB", "SCROLL"
+    ];
+    string constant RESERVES_PATH = "./logs/reserves.json";
 
-    function run(string memory reservesJson) public {
-        string memory network = vm.envString("NETWORK");
-        string memory pool = vm.envString("POOL");
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        address poolAddress = vm.envAddress(string(abi.encodePacked(network, "_", pool, "_POOL")));
+    function setUp() public {
+        for (uint i = 0; i < networkNames.length; i++) {
+            string memory networkName = networkNames[i];
+            string memory poolEnvVar = string(abi.encodePacked(networkName, "_MAIN_POOL"));
+            string memory rpcEnvVar = string(abi.encodePacked("RPC_", networkName));
+            
+            pools[networkName] = vm.envAddress(poolEnvVar);
+            rpcUrls[networkName] = vm.envString(rpcEnvVar);
+        }
+        // Special case for MAINNET_LIDO_POOL
+        pools["MAINNET_LIDO"] = vm.envAddress("MAINNET_LIDO_POOL");
+    }
 
-        string memory logContent = string(abi.encodePacked(
-            "Network: ", network, "\n",
-            "Pool: ", pool, "\n",
-            "Pool address: ", vm.toString(poolAddress), "\n"
-        ));
-
-        // Check if the network and pool exist in the JSON
-        bytes memory poolData = vm.parseJson(reservesJson, string(abi.encodePacked(".", network, ".", pool)));
-        if (poolData.length == 0) {
-            logContent = string(abi.encodePacked(logContent, "No reserves found for this network and pool. Skipping mintToTreasury call.\n"));
+    function run() public {
+        string memory targetNetwork = vm.envOr("TARGET_NETWORK", string(""));
+        if (bytes(targetNetwork).length > 0) {
+            runForNetwork(targetNetwork);
         } else {
-            // Parse reserves from JSON string
-            address[] memory assets = abi.decode(poolData, (address[]));
-            
-            logContent = string(abi.encodePacked(logContent, "Number of assets: ", vm.toString(assets.length), "\n\n"));
+            runForAllNetworks();
+        }
+    }
 
+    function runForNetwork(string memory networkName) internal {
+        require(pools[networkName] != address(0), "Invalid network name");
+        
+        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+        vm.createSelectFork(rpcUrls[networkName]);
+        vm.startBroadcast(deployerPrivateKey);
+        
+        mintToTreasuryForPool(networkName, "MAIN", pools[networkName]);
+        
+        if (keccak256(abi.encodePacked(networkName)) == keccak256(abi.encodePacked("MAINNET"))) {
+            mintToTreasuryForPool("MAINNET", "LIDO", pools["MAINNET_LIDO"]);
+        }
+        
+        vm.stopBroadcast();
+    }
+
+    function runForAllNetworks() internal {
+        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+
+        for (uint i = 0; i < networkNames.length; i++) {
+            string memory networkName = networkNames[i];
+            vm.createSelectFork(rpcUrls[networkName]);
             vm.startBroadcast(deployerPrivateKey);
-
-            IPool poolContract = IPool(poolAddress);
             
-            // Call mintToTreasury with all assets
-            try poolContract.mintToTreasury(assets) {
-                logContent = string(abi.encodePacked(logContent, "Successfully minted to treasury\n"));
-                for (uint i = 0; i < assets.length; i++) {
-                    logContent = string(abi.encodePacked(logContent, "Minted asset: ", vm.toString(assets[i]), "\n"));
-                }
-            } catch Error(string memory reason) {
-                logContent = string(abi.encodePacked(logContent, "Failed to mint to treasury. Reason: ", reason, "\n"));
-            } catch (bytes memory lowLevelData) {
-                logContent = string(abi.encodePacked(logContent, "Failed to mint to treasury. Low-level error: ", vm.toString(lowLevelData), "\n"));
+            mintToTreasuryForPool(networkName, "MAIN", pools[networkName]);
+            
+            if (keccak256(abi.encodePacked(networkName)) == keccak256(abi.encodePacked("MAINNET"))) {
+                mintToTreasuryForPool("MAINNET", "LIDO", pools["MAINNET_LIDO"]);
             }
             
             vm.stopBroadcast();
         }
+    }
 
-        // Write log to file
-        string memory filename = string(abi.encodePacked("./logs/mint_to_treasury_", network, "_", pool, "_", vm.toString(block.timestamp), ".log"));
-        vm.writeFile(filename, logContent);
-        
-        console.log("Mint to treasury operation completed for", network, pool);
-        console.log("Log written to:", filename);
+    function mintToTreasuryForPool(string memory network, string memory poolType, address poolAddress) internal {
+        address[] memory reserves = getReservesForPool(network, poolType);
+        if (reserves.length == 0) {
+            return; // Skip if reserves array is empty
+        }
+        IPool(poolAddress).mintToTreasury(reserves);
+    }
+
+    function getReservesForPool(string memory network, string memory poolType) internal view returns (address[] memory) {
+        string memory json = vm.readFile(RESERVES_PATH);
+        bytes memory parseJson = vm.parseJson(json, string(abi.encodePacked(".", network, ".", poolType)));
+        return abi.decode(parseJson, (address[]));
     }
 }
