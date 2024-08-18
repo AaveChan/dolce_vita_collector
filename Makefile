@@ -28,7 +28,12 @@ $(LOG_DIR):
 
 fetch-reserves: $(LOG_DIR)
 	@echo "Fetching reserves list for all networks..."
-	@forge script ${FETCH_RESERVES_SCRIPT} -vvvv
+	@forge script ${FETCH_RESERVES_SCRIPT} -vvvv || true
+	@if [ -f "./logs/reserves.json" ] && [ -s "./logs/reserves.json" ]; then \
+		echo "Reserves fetched successfully"; \
+	else \
+		echo "Failed to fetch reserves" && exit 1; \
+	fi
 
 mint:
 	@if [ -z "$(NETWORK)" ]; then \
@@ -39,4 +44,7 @@ mint:
 	TARGET_NETWORK=$(NETWORK) forge script script/MintToTreasury.s.sol:MintToTreasuryScript --broadcast
 
 clean:
-	@rm -rf $(LOG_DIR) broadcast cache out
+	@find $(LOG_DIR) -type f -delete
+	@find broadcast -mindepth 1 -delete
+	@find cache -mindepth 1 -delete
+	@find out -mindepth 1 -delete
