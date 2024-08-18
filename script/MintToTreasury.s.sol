@@ -13,7 +13,7 @@ contract MintToTreasuryScript is Script {
     mapping(string => string) rpcUrls;
     string[] networkNames = [
         "MAINNET", "AVALANCHE", "OPTIMISM", "POLYGON", 
-        "ARBITRUM", "METIS", "BASE", "GNOSIS", "BNB", "SCROLL"
+        "ARBITRUM", "BASE", "GNOSIS", "BNB", "SCROLL", "METIS"
     ];
     string constant RESERVES_PATH = "./logs/reserves.json";
 
