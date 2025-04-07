@@ -15,12 +15,10 @@ send_telegram_message() {
   curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" -d chat_id="$TELEGRAM_CHAT_ID" -d text="$message"
 }
 
-# Function to log messages and send to Telegram
+# Function to log messages
 log_message() {
-  local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-  local message="[$timestamp] $1"
-  echo "$message" | tee -a "$LOG_FILE"
-  send_telegram_message "$message"
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
+  send_telegram_message "$1"
 }
 
 # Check for command line arguments
@@ -65,19 +63,10 @@ else
 fi
 
 # Run make mint for each network without checking for success
-TOTAL_NETWORKS=${#NETWORKS[@]}
-for ((i=0; i<$TOTAL_NETWORKS; i++)); do
-  network=${NETWORKS[$i]}
-  log_message "($((i+1))/$TOTAL_NETWORKS) Starting make mint for $network"
+for network in "${NETWORKS[@]}"; do
+  log_message "Running make mint for $network"
   timeout 180 make mint NETWORK=$network
-  mint_result=$?
-  if [ $mint_result -eq 0 ]; then
-    log_message "($((i+1))/$TOTAL_NETWORKS) ✅ Completed make mint for $network successfully"
-  elif [ $mint_result -eq 124 ]; then
-    log_message "($((i+1))/$TOTAL_NETWORKS) ⏱️ make mint for $network timed out after 180 seconds"
-  else
-    log_message "($((i+1))/$TOTAL_NETWORKS) ❌ make mint for $network failed with exit code $mint_result"
-  fi
+  log_message "Completed make mint for $network"
 done
 
 log_message "🏁 Dolce Vita Collector script completed"
