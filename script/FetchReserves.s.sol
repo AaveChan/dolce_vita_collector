@@ -81,11 +81,13 @@ contract FetchReservesScript is Script {
     }
 
     function getNetworkConfigs() internal pure returns (NetworkConfig[] memory) {
-        NetworkConfig[] memory configs = new NetworkConfig[](10);
-        
-        string[] memory mainnetPools = new string[](2);
+        NetworkConfig[] memory configs = new NetworkConfig[](18);
+
+        string[] memory mainnetPools = new string[](4);
         mainnetPools[0] = "MAIN";
         mainnetPools[1] = "LIDO";
+        mainnetPools[2] = "ETHERFI";
+        mainnetPools[3] = "HORIZON";
         configs[0] = NetworkConfig("MAINNET", mainnetPools);
 
         string[] memory singlePool = new string[](1);
@@ -100,6 +102,14 @@ contract FetchReservesScript is Script {
         configs[7] = NetworkConfig("BNB", singlePool);
         configs[8] = NetworkConfig("SCROLL", singlePool);
         configs[9] = NetworkConfig("METIS", singlePool);
+        configs[10] = NetworkConfig("LINEA", singlePool);
+        configs[11] = NetworkConfig("SONIC", singlePool);
+        configs[12] = NetworkConfig("CELO", singlePool);
+        configs[13] = NetworkConfig("PLASMA", singlePool);
+        configs[14] = NetworkConfig("SONEIUM", singlePool);
+        configs[15] = NetworkConfig("MANTLE", singlePool);
+        configs[16] = NetworkConfig("MEGAETH", singlePool);
+        configs[17] = NetworkConfig("INK", singlePool);
 
         return configs;
     }

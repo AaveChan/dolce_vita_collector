@@ -12,8 +12,10 @@ contract MintToTreasuryScript is Script {
     mapping(string => address) pools;
     mapping(string => string) rpcUrls;
     string[] networkNames = [
-        "MAINNET", "AVALANCHE", "OPTIMISM", "POLYGON", 
-        "ARBITRUM", "BASE", "GNOSIS", "BNB", "SCROLL", "METIS"
+        "MAINNET", "AVALANCHE", "OPTIMISM", "POLYGON",
+        "ARBITRUM", "BASE", "GNOSIS", "BNB", "SCROLL", "METIS",
+        "LINEA", "SONIC", "CELO", "PLASMA", "SONEIUM",
+        "MANTLE", "MEGAETH", "INK"
     ];
     string constant RESERVES_PATH = "./logs/reserves.json";
 
@@ -26,8 +28,10 @@ contract MintToTreasuryScript is Script {
             pools[networkName] = vm.envAddress(poolEnvVar);
             rpcUrls[networkName] = vm.envString(rpcEnvVar);
         }
-        // Special case for MAINNET_LIDO_POOL
+        // Special cases for MAINNET_LIDO_POOL and MAINNET_ETHERFI_POOL
         pools["MAINNET_LIDO"] = vm.envAddress("MAINNET_LIDO_POOL");
+        pools["MAINNET_ETHERFI"] = vm.envAddress("MAINNET_ETHERFI_POOL");
+        pools["MAINNET_HORIZON"] = vm.envAddress("MAINNET_HORIZON_POOL");
     }
 
     function run() public {
@@ -50,6 +54,8 @@ contract MintToTreasuryScript is Script {
         
         if (keccak256(abi.encodePacked(networkName)) == keccak256(abi.encodePacked("MAINNET"))) {
             mintToTreasuryForPool("MAINNET", "LIDO", pools["MAINNET_LIDO"]);
+            mintToTreasuryForPool("MAINNET", "ETHERFI", pools["MAINNET_ETHERFI"]);
+            mintToTreasuryForPool("MAINNET", "HORIZON", pools["MAINNET_HORIZON"]);
         }
         
         vm.stopBroadcast();
@@ -67,6 +73,8 @@ contract MintToTreasuryScript is Script {
             
             if (keccak256(abi.encodePacked(networkName)) == keccak256(abi.encodePacked("MAINNET"))) {
                 mintToTreasuryForPool("MAINNET", "LIDO", pools["MAINNET_LIDO"]);
+                mintToTreasuryForPool("MAINNET", "ETHERFI", pools["MAINNET_ETHERFI"]);
+                mintToTreasuryForPool("MAINNET", "HORIZON", pools["MAINNET_HORIZON"]);
             }
             
             vm.stopBroadcast();

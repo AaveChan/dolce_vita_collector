@@ -120,18 +120,32 @@ When setting up this project, make sure to:
 ## Supported Networks
 
 The script supports the following networks:
-- MAINNET (weekly run)
+
+**Mainnet (weekly run):**
+- MAINNET (includes MAIN, LIDO, ETHERFI, HORIZON pools)
+
+**L2 Networks (daily run):**
 - AVALANCHE
 - OPTIMISM
 - POLYGON
 - ARBITRUM
-- METIS
 - BASE
 - GNOSIS
 - BNB
 - SCROLL
+- METIS
+- LINEA
+- SONIC
+- CELO
+- PLASMA
+- SONEIUM
+- MANTLE
+- MEGAETH
+- INK
 
 L2 networks are processed in the daily run, while MAINNET is processed in the weekly run.
+
+Note: ZkSync is not supported due to foundry incompatibility with zkEVM.
 
 ## Troubleshooting
 
