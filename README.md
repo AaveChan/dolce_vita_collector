@@ -2,6 +2,13 @@
 
 This project automates the process of minting to treasury for various Aave Pools across multiple networks. It includes scheduled scripts that run daily for L2 networks and weekly for MAINNET, with Telegram notifications for monitoring.
 
+## Features
+
+- **Gas Efficient**: Checks `accruedToTreasury` before minting, skips reserves with nothing to collect
+- **Multi-Network**: Supports 18 networks with automatic legacy gas pricing where needed (METIS, BNB, CELO)
+- **Secure**: Private key stored in separate `.keyfile` with restricted permissions, never exposed in command line output
+- **Monitored**: Telegram notifications with detailed summary reports and transaction hashes
+
 ## Setup
 
 1. Clone the repository:
@@ -16,17 +23,23 @@ This project automates the process of minting to treasury for various Aave Pools
    foundryup
    ```
 
-3. Copy `.env.example` to `.env` and fill in your private key and any other necessary details:
+3. Copy `.env.example` to `.env` and fill in RPC URLs and other config:
    ```
    cp .env.example .env
    ```
 
-4. Build the project:
+4. Create a `.keyfile` with your private key (keeps it out of command line):
+   ```
+   echo "0xYOUR_PRIVATE_KEY" > .keyfile
+   chmod 600 .keyfile
+   ```
+
+5. Build the project:
    ```
    forge build
    ```
 
-5. Set up the automated script and Telegram notifications:
+6. Set up the automated script and Telegram notifications:
    - Ensure the `dolce_vita_collector_with_notifications.sh` script is executable:
      ```
      chmod +x dolce_vita_collector_with_notifications.sh
@@ -79,8 +92,9 @@ Note: After cloning the repository, make sure to update the paths in the systemd
 
 The script sends Telegram notifications for:
 - Start of each run
-- Successful completion of each run
-- Any errors encountered during the run
+- Summary report with success/failure counts
+- Transaction hashes for successful mints
+- Error details for failed networks
 
 To manually trigger a run:
 ```
