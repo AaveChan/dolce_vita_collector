@@ -15,14 +15,20 @@ TIMEOUT := 300
 # Network list
 NETWORK_LIST := MAINNET AVALANCHE OPTIMISM POLYGON ARBITRUM BASE GNOSIS BNB SCROLL METIS LINEA SONIC CELO PLASMA SONEIUM MANTLE MEGAETH INK
 
+# Private key file (more secure than command line)
+KEYFILE := .keyfile
+
 # Dry run support
 ifneq ($(dry),)
   PRIVATE_KEY_ARG := --sender $(SENDER)
   EXTRA_ARGS := -vvvv
 else
-  PRIVATE_KEY_ARG := --private-key ${PRIVATE_KEY}
+  PRIVATE_KEY_ARG := --private-key "$$(cat $(KEYFILE))"
   EXTRA_ARGS := --broadcast -vvvv
 endif
+
+# Networks that don't support EIP-1559 and need legacy gas pricing
+LEGACY_NETWORKS := METIS BNB CELO
 
 .PHONY: fetch-reserves mint clean run-all
 
@@ -44,8 +50,13 @@ mint:
 		echo "❌ Error: NETWORK is not set. Use 'make mint NETWORK=<network_name>' or set NETWORK in .env file."; \
 		exit 1; \
 	fi
+	@if [ ! -f "$(KEYFILE)" ]; then \
+		echo "❌ Error: Keyfile not found. Create .keyfile with your private key."; \
+		exit 1; \
+	fi
 	@echo "🚀 Minting to treasury for network: $(NETWORK)"
-	TARGET_NETWORK=$(NETWORK) timeout $(TIMEOUT) forge script ${MINT_TO_TREASURY_SCRIPT}:MintToTreasuryScript ${EXTRA_ARGS} ${PRIVATE_KEY_ARG}
+	$(eval LEGACY_FLAG := $(if $(filter $(NETWORK),$(LEGACY_NETWORKS)),--legacy,))
+	@TARGET_NETWORK=$(NETWORK) timeout $(TIMEOUT) forge script ${MINT_TO_TREASURY_SCRIPT}:MintToTreasuryScript ${EXTRA_ARGS} --private-key "$$(cat $(KEYFILE))" $(LEGACY_FLAG)
 
 clean:
 	@echo "🧹 Cleaning logs and build artifacts..."

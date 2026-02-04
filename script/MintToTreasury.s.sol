@@ -6,6 +6,25 @@ import "forge-std/console.sol";
 
 interface IPool {
     function mintToTreasury(address[] calldata assets) external;
+    function getReserveData(address asset) external view returns (ReserveData memory);
+}
+
+struct ReserveData {
+    uint256 configuration;
+    uint128 liquidityIndex;
+    uint128 currentLiquidityRate;
+    uint128 variableBorrowIndex;
+    uint128 currentVariableBorrowRate;
+    uint128 currentStableBorrowRate;
+    uint40 lastUpdateTimestamp;
+    uint16 id;
+    address aTokenAddress;
+    address stableDebtTokenAddress;
+    address variableDebtTokenAddress;
+    address interestRateStrategyAddress;
+    uint128 accruedToTreasury;
+    uint128 unbacked;
+    uint128 isolationModeTotalDebt;
 }
 
 contract MintToTreasuryScript is Script {
@@ -84,14 +103,53 @@ contract MintToTreasuryScript is Script {
     function mintToTreasuryForPool(string memory network, string memory poolType, address poolAddress) internal {
         address[] memory reserves = getReservesForPool(network, poolType);
         if (reserves.length == 0) {
-            return; // Skip if reserves array is empty
+            console.log("Skipping %s %s: no reserves", network, poolType);
+            return;
         }
-        IPool(poolAddress).mintToTreasury(reserves);
+
+        // Filter to only reserves with accrued interest
+        address[] memory reservesWithAccrued = new address[](reserves.length);
+        uint256 count = 0;
+        uint256 totalAccrued = 0;
+
+        for (uint256 i = 0; i < reserves.length; i++) {
+            ReserveData memory data = IPool(poolAddress).getReserveData(reserves[i]);
+            if (data.accruedToTreasury > 0) {
+                reservesWithAccrued[count] = reserves[i];
+                totalAccrued += data.accruedToTreasury;
+                count++;
+            }
+        }
+
+        if (count == 0) {
+            console.log("Skipping %s %s: no accrued interest", network, poolType);
+            return;
+        }
+
+        // Resize array to actual count
+        address[] memory finalReserves = new address[](count);
+        for (uint256 i = 0; i < count; i++) {
+            finalReserves[i] = reservesWithAccrued[i];
+        }
+
+        console.log("Minting %s %s: %d reserves with accrued interest", network, poolType, count);
+        IPool(poolAddress).mintToTreasury(finalReserves);
     }
 
     function getReservesForPool(string memory network, string memory poolType) internal view returns (address[] memory) {
         string memory json = vm.readFile(RESERVES_PATH);
-        bytes memory parseJson = vm.parseJson(json, string(abi.encodePacked(".", network, ".", poolType)));
+        string memory path = string(abi.encodePacked(".", network, ".", poolType));
+
+        // Check if key exists before parsing
+        if (!vm.keyExistsJson(json, path)) {
+            return new address[](0);
+        }
+
+        bytes memory parseJson = vm.parseJson(json, path);
+        if (parseJson.length == 0) {
+            return new address[](0);
+        }
+
         return abi.decode(parseJson, (address[]));
     }
 }

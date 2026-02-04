@@ -13,19 +13,69 @@ LOG_DIR="$SCRIPT_DIR/logs"
 LOG_FILE="$LOG_DIR/dolce_vita_collector_log.txt"
 mkdir -p "$LOG_DIR"
 
+# Track results
+declare -a SUCCESS_NETWORKS=()
+declare -a FAILED_NETWORKS=()
+declare -a TIMEOUT_NETWORKS=()
+declare -A TX_HASHES=()
+
 # === Helpers ===
 
 send_telegram_message() {
   local message=$1
-  curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+  local response
+  response=$(curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
     -d chat_id="$TELEGRAM_CHAT_ID" \
-    -d text="$message"
+    -d text="$message" \
+    -d parse_mode="HTML" 2>&1)
+  if ! echo "$response" | grep -q '"ok":true'; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - WARNING: Telegram send failed: $response" >> "$LOG_FILE"
+  fi
 }
 
 log_message() {
   local message="$1"
+  local notify="${2:-true}"
   echo "$(date '+%Y-%m-%d %H:%M:%S') - $message" | tee -a "$LOG_FILE"
-  send_telegram_message "$message"
+  if [ "$notify" = "true" ]; then
+    send_telegram_message "$message"
+  fi
+}
+
+log_local() {
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
+}
+
+get_tx_hash() {
+  local network=$1
+  local chain_id
+
+  case $network in
+    MAINNET) chain_id=1 ;;
+    AVALANCHE) chain_id=43114 ;;
+    OPTIMISM) chain_id=10 ;;
+    POLYGON) chain_id=137 ;;
+    ARBITRUM) chain_id=42161 ;;
+    BASE) chain_id=8453 ;;
+    GNOSIS) chain_id=100 ;;
+    BNB) chain_id=56 ;;
+    SCROLL) chain_id=534352 ;;
+    METIS) chain_id=1088 ;;
+    LINEA) chain_id=59144 ;;
+    SONIC) chain_id=146 ;;
+    CELO) chain_id=42220 ;;
+    PLASMA) chain_id=3693 ;;
+    SONEIUM) chain_id=1868 ;;
+    MANTLE) chain_id=5000 ;;
+    MEGAETH) chain_id=6342 ;;
+    INK) chain_id=57073 ;;
+    *) return 1 ;;
+  esac
+
+  local broadcast_file="$SCRIPT_DIR/broadcast/MintToTreasury.s.sol/$chain_id/run-latest.json"
+  if [ -f "$broadcast_file" ]; then
+    grep -o '"hash": *"0x[a-fA-F0-9]*"' "$broadcast_file" | head -1 | sed 's/.*"0x/0x/' | tr -d '"'
+  fi
 }
 
 # === Network Selection ===
@@ -73,13 +123,63 @@ fi
 
 # === Mint to treasury for each network ===
 for network in "${NETWORKS[@]}"; do
-  log_message "🚀 Running make mint for $network"
-  timeout 180 make mint NETWORK="$network"
-  if [ $? -eq 124 ]; then
-    log_message "⏰ Timeout: mint for $network took too long (180s)"
+  log_local "Starting mint for $network"
+
+  MINT_OUTPUT=$(timeout 180 make mint NETWORK="$network" 2>&1)
+  MINT_EXIT=$?
+
+  if [ $MINT_EXIT -eq 124 ]; then
+    TIMEOUT_NETWORKS+=("$network")
+    log_message "⏰ $network: Timeout after 180s"
+  elif [ $MINT_EXIT -ne 0 ]; then
+    FAILED_NETWORKS+=("$network")
+    ERROR_MSG=$(echo "$MINT_OUTPUT" | grep -i "error\|revert\|fail" | tail -1)
+    log_local "Mint failed for $network: $MINT_OUTPUT"
+    log_message "❌ $network: Failed${ERROR_MSG:+ - $ERROR_MSG}"
   else
-    log_message "✅ Completed mint for $network"
+    TX_HASH=$(get_tx_hash "$network")
+    if [ -n "$TX_HASH" ]; then
+      TX_HASHES[$network]="$TX_HASH"
+      SUCCESS_NETWORKS+=("$network")
+      log_local "Mint succeeded for $network: $TX_HASH"
+    else
+      SUCCESS_NETWORKS+=("$network")
+      log_local "Mint succeeded for $network (no tx hash found)"
+    fi
   fi
 done
 
-log_message "🏁 Dolce Vita Collector run completed"
+# === Summary Report ===
+TOTAL=${#NETWORKS[@]}
+SUCCESS_COUNT=${#SUCCESS_NETWORKS[@]}
+FAILED_COUNT=${#FAILED_NETWORKS[@]}
+TIMEOUT_COUNT=${#TIMEOUT_NETWORKS[@]}
+
+SUMMARY="🏁 <b>Dolce Vita Collector Complete</b>
+
+📊 Results: $SUCCESS_COUNT/$TOTAL succeeded"
+
+if [ $FAILED_COUNT -gt 0 ]; then
+  SUMMARY+=$'\n'"❌ Failed: ${FAILED_NETWORKS[*]}"
+fi
+
+if [ $TIMEOUT_COUNT -gt 0 ]; then
+  SUMMARY+=$'\n'"⏰ Timeout: ${TIMEOUT_NETWORKS[*]}"
+fi
+
+if [ $SUCCESS_COUNT -gt 0 ] && [ ${#TX_HASHES[@]} -gt 0 ]; then
+  SUMMARY+=$'\n\n'"✅ Successful:"
+  for network in "${SUCCESS_NETWORKS[@]}"; do
+    if [ -n "${TX_HASHES[$network]}" ]; then
+      SHORT_HASH="${TX_HASHES[$network]:0:10}..."
+      SUMMARY+=$'\n'"• $network: <code>$SHORT_HASH</code>"
+    fi
+  done
+fi
+
+log_message "$SUMMARY"
+
+# Exit with failure if any network failed
+if [ $FAILED_COUNT -gt 0 ] || [ $TIMEOUT_COUNT -gt 0 ]; then
+  exit 1
+fi
