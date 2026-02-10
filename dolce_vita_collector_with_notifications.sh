@@ -179,7 +179,8 @@ fi
 
 log_message "$SUMMARY"
 
-# Exit with failure if any network failed
-if [ $FAILED_COUNT -gt 0 ] || [ $TIMEOUT_COUNT -gt 0 ]; then
+# Exit 0 on partial failures (summary already sent via Telegram)
+# Exit 1 only if ALL networks failed (total infrastructure issue)
+if [ $SUCCESS_COUNT -eq 0 ]; then
   exit 1
 fi
