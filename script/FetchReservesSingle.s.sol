@@ -9,7 +9,7 @@ interface IPool {
 }
 
 /// @notice Fetches reserves for a SINGLE network (called in parallel by bash wrapper)
-/// Usage: TARGET_NETWORK=MAINNET forge script script/FetchReservesSingle.s.sol -vvvv
+/// Usage: TARGET_NETWORK=MAINNET TARGET_POOLS=MAIN,LIDO forge script script/FetchReservesSingle.s.sol -vvvv
 contract FetchReservesSingleScript is Script {
     function setUp() public {}
 
@@ -17,18 +17,8 @@ contract FetchReservesSingleScript is Script {
         string memory networkName = vm.envString("TARGET_NETWORK");
         string memory rpc = vm.envString(string(abi.encodePacked("RPC_", networkName)));
 
-        // Determine pools for this network
-        string[] memory poolNames;
-        if (keccak256(abi.encodePacked(networkName)) == keccak256(abi.encodePacked("MAINNET"))) {
-            poolNames = new string[](4);
-            poolNames[0] = "MAIN";
-            poolNames[1] = "LIDO";
-            poolNames[2] = "ETHERFI";
-            poolNames[3] = "HORIZON";
-        } else {
-            poolNames = new string[](1);
-            poolNames[0] = "MAIN";
-        }
+        // Pool types auto-discovered from .env by the bash wrapper
+        string[] memory poolNames = vm.envString("TARGET_POOLS", ",");
 
         string memory jsonOutput = "{";
         bool isFirstPool = true;

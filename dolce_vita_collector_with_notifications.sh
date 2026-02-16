@@ -78,25 +78,26 @@ get_tx_hash() {
   fi
 }
 
-# === Network Selection ===
+# === Network Selection (auto-derived from .env RPC_* entries) ===
+
+ALL_NETWORKS=($(grep -oP '^RPC_\K[A-Z0-9_]+(?==)' "$SCRIPT_DIR/.env"))
 
 if [ "$1" == "--mainnet-only" ]; then
   NETWORKS=("MAINNET")
   log_message "🔄 Starting Dolce Vita Collector (MAINNET only)"
 elif [ "$1" == "--l2s-only" ]; then
-  NETWORKS=("AVALANCHE" "OPTIMISM" "POLYGON" "ARBITRUM" "METIS" "BASE" "GNOSIS" "BNB" "SCROLL" "LINEA" "SONIC" "CELO" "PLASMA" "SONEIUM" "MANTLE" "MEGAETH" "INK")
-  log_message "🔄 Starting Dolce Vita Collector (L2s only)"
+  NETWORKS=()
+  for n in "${ALL_NETWORKS[@]}"; do
+    [ "$n" != "MAINNET" ] && NETWORKS+=("$n")
+  done
+  log_message "🔄 Starting Dolce Vita Collector (${#NETWORKS[@]} L2s)"
 else
   log_message "❌ Invalid or no argument provided. Use --mainnet-only or --l2s-only"
   exit 1
 fi
 
-# === Run make clean ===
-log_message "🧹 Running make clean"
-make clean
-if [ $? -ne 0 ]; then
-  log_message "⚠️ Warning: make clean failed"
-fi
+# === Clean broadcast artifacts (reserves are freshly fetched each run) ===
+find "$SCRIPT_DIR/broadcast" -mindepth 1 -delete 2>/dev/null || true
 
 # === Fetch reserves ===
 log_message "📥 Running make fetch-reserves (parallel, timeout: 300s)"

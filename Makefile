@@ -12,8 +12,8 @@ LOG_DIR := ./logs
 # Timeout duration (in seconds)
 TIMEOUT := 300
 
-# Network list
-NETWORK_LIST := MAINNET AVALANCHE OPTIMISM POLYGON ARBITRUM BASE GNOSIS BNB SCROLL METIS LINEA SONIC CELO PLASMA SONEIUM MANTLE MEGAETH INK
+# Network list — auto-derived from .env RPC_* entries
+NETWORK_LIST := $(shell grep -oP '^RPC_\K[A-Z0-9_]+(?==)' .env)
 
 # Private key file (more secure than command line)
 KEYFILE := .keyfile
@@ -67,8 +67,7 @@ clean:
 	@echo "🧹 Cleaning logs and broadcast artifacts..."
 	@find $(LOG_DIR) -type f -delete
 	@find broadcast -mindepth 1 -delete 2>/dev/null || true
-	@find cache -mindepth 1 -delete 2>/dev/null || true
-	@echo "✅ Clean complete (compiler cache preserved)"
+	@echo "✅ Clean complete"
 
 # Full clean including compiled artifacts (slow rebuild)
 clean-all: clean

@@ -1,6 +1,6 @@
 #!/bin/bash
-# Parallel reserves fetcher with retry — runs one forge call per network concurrently
-# Replaces the monolithic FetchReserves.s.sol that times out with 18+ networks
+# Per-network reserves fetcher with retry
+# Networks and pools auto-discovered from .env (RPC_* and *_POOL entries)
 
 set -euo pipefail
 
@@ -12,105 +12,88 @@ export FOUNDRY_DISABLE_NIGHTLY_WARNING=1
 LOG_DIR="$SCRIPT_DIR/logs"
 mkdir -p "$LOG_DIR"
 
-NETWORKS=(
-  MAINNET AVALANCHE OPTIMISM POLYGON ARBITRUM BASE GNOSIS BNB
-  SCROLL METIS LINEA SONIC CELO PLASMA SONEIUM MANTLE MEGAETH INK
-)
+# Auto-discover networks from .env RPC_* entries
+mapfile -t NETWORKS < <(grep -oP '^RPC_\K[A-Z0-9_]+(?==)' "$SCRIPT_DIR/.env")
 
-MAX_PARALLEL=${MAX_PARALLEL:-3}
+if [ ${#NETWORKS[@]} -eq 0 ]; then
+  echo "❌ No RPC_* entries found in .env"
+  exit 1
+fi
+
 TIMEOUT_PER_NETWORK=${TIMEOUT_PER_NETWORK:-90}
 MAX_RETRIES=${MAX_RETRIES:-2}
-STAGGER_MS=${STAGGER_MS:-2}  # seconds between launches to avoid rate limit bursts
 
 # Clean old fragments
 rm -f "$LOG_DIR"/reserves_*.json
 
-echo "🔄 Fetching reserves for ${#NETWORKS[@]} networks (max $MAX_PARALLEL parallel, ${TIMEOUT_PER_NETWORK}s timeout, $MAX_RETRIES retries)"
+echo "🔄 Fetching reserves for ${#NETWORKS[@]} networks (sequential, ${TIMEOUT_PER_NETWORK}s timeout, $MAX_RETRIES retries)"
+
+get_pools() {
+  local network=$1
+  grep -oP "^${network}_\K[A-Z0-9_]+(?=_POOL=)" "$SCRIPT_DIR/.env" | tr '\n' ',' | sed 's/,$//'
+}
 
 fetch_network() {
   local network=$1
   local logfile="$LOG_DIR/fetch_${network}.log"
-  
+  local pools
+  pools=$(get_pools "$network")
+
   TARGET_NETWORK="$network" \
+    TARGET_POOLS="$pools" \
     timeout "$TIMEOUT_PER_NETWORK" \
     forge script script/FetchReservesSingle.s.sol:FetchReservesSingleScript -vvvv \
     > "$logfile" 2>&1
 }
 
-run_batch() {
-  local -n networks_ref=$1
-  local -n succeeded_ref=$2
-  local -n failed_ref=$3
-  
-  declare -A PIDS
-  local running=0
-  
-  for network in "${networks_ref[@]}"; do
-    fetch_network "$network" &
-    PIDS[$network]=$!
-    running=$((running + 1))
-    
-    # Stagger to avoid Alchemy rate limit bursts
-    sleep "$STAGGER_MS"
+succeeded=()
+failed=()
 
-    if [ $running -ge $MAX_PARALLEL ]; then
-      wait -n 2>/dev/null || true
-      running=$((running - 1))
-    fi
-  done
-
-  # Wait for all
-  for network in "${networks_ref[@]}"; do
-    pid=${PIDS[$network]}
-    if wait "$pid" 2>/dev/null; then
-      if [ -f "$LOG_DIR/reserves_${network}.json" ] && [ -s "$LOG_DIR/reserves_${network}.json" ]; then
-        succeeded_ref+=("$network")
-      else
-        failed_ref+=("$network")
-      fi
+for network in "${NETWORKS[@]}"; do
+  if fetch_network "$network"; then
+    if [ -f "$LOG_DIR/reserves_${network}.json" ] && [ -s "$LOG_DIR/reserves_${network}.json" ]; then
+      succeeded+=("$network")
+      echo "  ✅ $network"
     else
-      failed_ref+=("$network")
+      failed+=("$network")
+      echo "  ❌ $network (no output)"
     fi
-  done
-}
+  else
+    failed+=("$network")
+    echo "  ❌ $network"
+  fi
+done
 
-# === Pass 1 ===
-declare -a SUCCEEDED=()
-declare -a FAILED=()
-run_batch NETWORKS SUCCEEDED FAILED
+echo "Pass 1: ${#succeeded[@]}/${#NETWORKS[@]}"
 
-echo "Pass 1: ${#SUCCEEDED[@]}/${#NETWORKS[@]} succeeded"
-
-# === Retry failed networks sequentially (more reliable) ===
+# Retry failed networks
 retry=0
-while [ ${#FAILED[@]} -gt 0 ] && [ $retry -lt $MAX_RETRIES ]; do
+while [ ${#failed[@]} -gt 0 ] && [ $retry -lt $MAX_RETRIES ]; do
   retry=$((retry + 1))
-  echo "🔁 Retry $retry/${MAX_RETRIES} for ${#FAILED[@]} failed: ${FAILED[*]}"
-  sleep 5  # cool down before retry
-  
-  declare -a RETRY_LIST=("${FAILED[@]}")
-  FAILED=()
-  
-  # Retry one at a time (sequential) to avoid rate limits
-  for network in "${RETRY_LIST[@]}"; do
+  echo "🔁 Retry $retry/$MAX_RETRIES for ${#failed[@]} failed: ${failed[*]}"
+  sleep 5
+
+  retry_list=("${failed[@]}")
+  failed=()
+
+  for network in "${retry_list[@]}"; do
     if fetch_network "$network"; then
       if [ -f "$LOG_DIR/reserves_${network}.json" ] && [ -s "$LOG_DIR/reserves_${network}.json" ]; then
-        SUCCEEDED+=("$network")
+        succeeded+=("$network")
         echo "  ✅ $network recovered"
       else
-        FAILED+=("$network")
+        failed+=("$network")
       fi
     else
-      FAILED+=("$network")
+      failed+=("$network")
       echo "  ❌ $network still failing"
     fi
-    sleep 2
   done
 done
 
-echo "✅ Final: ${#SUCCEEDED[@]}/${#NETWORKS[@]} — ${SUCCEEDED[*]}"
-if [ ${#FAILED[@]} -gt 0 ]; then
-  echo "❌ Still failed after retries: ${FAILED[*]}"
+echo "✅ Final: ${#succeeded[@]}/${#NETWORKS[@]} — ${succeeded[*]}"
+if [ ${#failed[@]} -gt 0 ]; then
+  echo "❌ Still failed after retries: ${failed[*]}"
 fi
 
 # Merge fragments into single reserves.json
@@ -133,7 +116,7 @@ with open('$LOG_DIR/reserves.json', 'w') as out:
 print(f'Merged {len(merged)} networks into reserves.json')
 "
 
-# Validate — require at least 14/18 (allow some transient RPC failures)
+# Validate — require at least 14/N (allow some transient RPC failures)
 MERGED_COUNT=$(python3 -c "import json; print(len(json.load(open('$LOG_DIR/reserves.json'))))")
 MIN_NETWORKS=14
 
