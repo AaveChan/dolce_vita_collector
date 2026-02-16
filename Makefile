@@ -37,13 +37,18 @@ $(LOG_DIR):
 	@mkdir -p $(LOG_DIR)
 
 fetch-reserves: $(LOG_DIR)
-	@echo "🔄 Fetching reserves list for all networks..."
-	@forge script ${FETCH_RESERVES_SCRIPT}:FetchReservesScript -vvvv || true
+	@echo "🔄 Fetching reserves in parallel..."
+	@bash ./fetch_reserves_parallel.sh
 	@if [ -f "./logs/reserves.json" ] && [ -s "./logs/reserves.json" ]; then \
 		echo "✅ Reserves fetched successfully"; \
 	else \
 		echo "❌ Failed to fetch reserves" && exit 1; \
 	fi
+
+# Legacy sequential fetch (kept for reference)
+fetch-reserves-sequential: $(LOG_DIR)
+	@echo "🔄 Fetching reserves list for all networks (sequential)..."
+	@forge script ${FETCH_RESERVES_SCRIPT}:FetchReservesScript -vvvv || true
 
 mint:
 	@if [ -z "$(NETWORK)" ]; then \

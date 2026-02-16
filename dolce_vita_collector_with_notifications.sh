@@ -99,12 +99,12 @@ if [ $? -ne 0 ]; then
 fi
 
 # === Fetch reserves ===
-log_message "📥 Running make fetch-reserves (timeout: 180s)"
-timeout 180 make fetch-reserves
+log_message "📥 Running make fetch-reserves (parallel, timeout: 300s)"
+timeout 300 make fetch-reserves
 FETCH_RESULT=$?
 
 if [ $FETCH_RESULT -eq 124 ]; then
-  log_message "❌ Error: fetch-reserves timed out after 180 seconds"
+  log_message "❌ Error: fetch-reserves timed out after 300 seconds"
   exit 1
 elif [ $FETCH_RESULT -ne 0 ]; then
   log_message "❌ Error: fetch-reserves failed (status: $FETCH_RESULT)"
