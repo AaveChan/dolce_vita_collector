@@ -64,12 +64,16 @@ mint:
 	@TARGET_NETWORK=$(NETWORK) timeout $(TIMEOUT) forge script ${MINT_TO_TREASURY_SCRIPT}:MintToTreasuryScript ${EXTRA_ARGS} --private-key "$$(cat $(KEYFILE))" $(LEGACY_FLAG)
 
 clean:
-	@echo "🧹 Cleaning logs and build artifacts..."
+	@echo "🧹 Cleaning logs and broadcast artifacts..."
 	@find $(LOG_DIR) -type f -delete
-	@find broadcast -mindepth 1 -delete
-	@find cache -mindepth 1 -delete
-	@find out -mindepth 1 -delete
-	@echo "✅ Clean complete"
+	@find broadcast -mindepth 1 -delete 2>/dev/null || true
+	@find cache -mindepth 1 -delete 2>/dev/null || true
+	@echo "✅ Clean complete (compiler cache preserved)"
+
+# Full clean including compiled artifacts (slow rebuild)
+clean-all: clean
+	@find out -mindepth 1 -delete 2>/dev/null || true
+	@echo "✅ Full clean complete"
 
 run-all: fetch-reserves
 	@for network in $(NETWORK_LIST); do \
