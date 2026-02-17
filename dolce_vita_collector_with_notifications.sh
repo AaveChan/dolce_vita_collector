@@ -2,6 +2,9 @@
 
 # === Dolce Vita Collector Script ===
 
+# Ensure foundry is on PATH (cron/non-interactive shells don't source .bashrc)
+export PATH="$HOME/.foundry/bin:$PATH"
+
 # Get the script's directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
