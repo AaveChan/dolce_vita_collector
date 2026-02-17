@@ -103,12 +103,12 @@ fi
 find "$SCRIPT_DIR/broadcast" -mindepth 1 -delete 2>/dev/null || true
 
 # === Fetch reserves ===
-log_message "📥 Running make fetch-reserves (parallel, timeout: 300s)"
-timeout 300 make fetch-reserves
+log_message "📥 Running make fetch-reserves (parallel, timeout: 600s)"
+timeout 600 make fetch-reserves
 FETCH_RESULT=$?
 
 if [ $FETCH_RESULT -eq 124 ]; then
-  log_message "❌ Error: fetch-reserves timed out after 300 seconds"
+  log_message "❌ Error: fetch-reserves timed out after 600 seconds"
   exit 1
 elif [ $FETCH_RESULT -ne 0 ]; then
   log_message "❌ Error: fetch-reserves failed (status: $FETCH_RESULT)"
