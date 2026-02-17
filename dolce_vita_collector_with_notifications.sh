@@ -123,31 +123,49 @@ else
 fi
 
 # === Mint to treasury for each network ===
+MAX_RETRIES=3
+DELAY_BETWEEN=8
+
 for network in "${NETWORKS[@]}"; do
   log_local "Starting mint for $network"
 
-  MINT_OUTPUT=$(timeout 180 make mint NETWORK="$network" 2>&1)
-  MINT_EXIT=$?
+  success=false
+  for attempt in $(seq 1 $MAX_RETRIES); do
+    MINT_OUTPUT=$(timeout 180 make mint NETWORK="$network" 2>&1)
+    MINT_EXIT=$?
 
-  if [ $MINT_EXIT -eq 124 ]; then
-    TIMEOUT_NETWORKS+=("$network")
-    log_message "⏰ $network: Timeout after 180s"
-  elif [ $MINT_EXIT -ne 0 ]; then
-    FAILED_NETWORKS+=("$network")
-    ERROR_MSG=$(echo "$MINT_OUTPUT" | grep -i "error\|revert\|fail" | tail -1)
-    log_local "Mint failed for $network: $MINT_OUTPUT"
-    log_message "❌ $network: Failed${ERROR_MSG:+ - $ERROR_MSG}"
-  else
-    TX_HASH=$(get_tx_hash "$network")
-    if [ -n "$TX_HASH" ]; then
-      TX_HASHES[$network]="$TX_HASH"
+    if [ $MINT_EXIT -eq 0 ]; then
+      TX_HASH=$(get_tx_hash "$network")
+      if [ -n "$TX_HASH" ]; then
+        TX_HASHES[$network]="$TX_HASH"
+      fi
       SUCCESS_NETWORKS+=("$network")
-      log_local "Mint succeeded for $network: $TX_HASH"
+      log_local "Mint succeeded for $network${TX_HASH:+ : $TX_HASH} (attempt $attempt)"
+      success=true
+      break
+    fi
+
+    if [ $attempt -lt $MAX_RETRIES ]; then
+      BACKOFF=$((DELAY_BETWEEN * attempt))
+      log_local "Mint failed for $network (attempt $attempt/$MAX_RETRIES), retrying in ${BACKOFF}s..."
+      sleep $BACKOFF
+    fi
+  done
+
+  if [ "$success" = false ]; then
+    if [ $MINT_EXIT -eq 124 ]; then
+      TIMEOUT_NETWORKS+=("$network")
+      log_message "⏰ $network: Timeout after $MAX_RETRIES attempts"
     else
-      SUCCESS_NETWORKS+=("$network")
-      log_local "Mint succeeded for $network (no tx hash found)"
+      FAILED_NETWORKS+=("$network")
+      ERROR_MSG=$(echo "$MINT_OUTPUT" | grep -i "error\|revert\|fail" | tail -1)
+      log_local "Mint failed for $network after $MAX_RETRIES attempts: $MINT_OUTPUT"
+      log_message "❌ $network: Failed after $MAX_RETRIES attempts${ERROR_MSG:+ - $ERROR_MSG}"
     fi
   fi
+
+  # Throttle between chains to avoid Alchemy rate limits
+  sleep $DELAY_BETWEEN
 done
 
 # === Summary Report ===
