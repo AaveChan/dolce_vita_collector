@@ -1,5 +1,7 @@
 # Makefile for Dolce Vita Collector
 
+export PATH := $(HOME)/.foundry/bin:$(PATH)
+
 include .env
 
 # Scripts
