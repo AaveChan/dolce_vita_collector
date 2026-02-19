@@ -2,24 +2,35 @@
 
 # === Dolce Vita Collector Script ===
 
-# Ensure foundry is on PATH (cron/non-interactive shells don't source .bashrc)
 export PATH="$HOME/.foundry/bin:$PATH"
+export FOUNDRY_DISABLE_NIGHTLY_WARNING=1
 
-# Get the script's directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
-# Load environment variables
+if [[ ! -f "$SCRIPT_DIR/.env" ]]; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - FATAL: .env not found at $SCRIPT_DIR/.env" >&2
+  exit 1
+fi
 source "$SCRIPT_DIR/.env"
 
-# Log setup
 LOG_DIR="$SCRIPT_DIR/logs"
 LOG_FILE="$LOG_DIR/dolce_vita_collector_log.txt"
 mkdir -p "$LOG_DIR"
 
-# Track results
-declare -a SUCCESS_NETWORKS=()
-declare -a FAILED_NETWORKS=()
-declare -a TIMEOUT_NETWORKS=()
+KEYFILE="$SCRIPT_DIR/.keyfile"
+if [[ ! -f "$KEYFILE" ]]; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - FATAL: .keyfile not found" >&2
+  exit 1
+fi
+MINT_TIMEOUT=60
+MAX_RETRIES=3
+DELAY_BETWEEN=5
+LEGACY_NETWORKS="METIS BNB CELO"
+
+declare -a SUCCESS_POOLS=()
+declare -a FAILED_POOLS=()
+declare -a TIMEOUT_POOLS=()
+declare -a SKIPPED_POOLS=()
 declare -A TX_HASHES=()
 
 # === Helpers ===
@@ -49,160 +60,177 @@ log_local() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
 }
 
-get_tx_hash() {
-  local network=$1
-  local chain_id
-
-  case $network in
-    MAINNET) chain_id=1 ;;
-    AVALANCHE) chain_id=43114 ;;
-    OPTIMISM) chain_id=10 ;;
-    POLYGON) chain_id=137 ;;
-    ARBITRUM) chain_id=42161 ;;
-    BASE) chain_id=8453 ;;
-    GNOSIS) chain_id=100 ;;
-    BNB) chain_id=56 ;;
-    SCROLL) chain_id=534352 ;;
-    METIS) chain_id=1088 ;;
-    LINEA) chain_id=59144 ;;
-    SONIC) chain_id=146 ;;
-    CELO) chain_id=42220 ;;
-    PLASMA) chain_id=3693 ;;
-    SONEIUM) chain_id=1868 ;;
-    MANTLE) chain_id=5000 ;;
-    MEGAETH) chain_id=6342 ;;
-    INK) chain_id=57073 ;;
-    *) return 1 ;;
-  esac
-
-  local broadcast_file="$SCRIPT_DIR/broadcast/MintToTreasury.s.sol/$chain_id/run-latest.json"
-  if [ -f "$broadcast_file" ]; then
-    grep -o '"hash": *"0x[a-fA-F0-9]*"' "$broadcast_file" | head -1 | sed 's/.*"0x/0x/' | tr -d '"'
-  fi
+is_legacy() {
+  local network="$1"
+  [[ " $LEGACY_NETWORKS " == *" $network "* ]]
 }
 
-# === Network Selection (auto-derived from .env RPC_* entries) ===
+env_fallback_pools() {
+  grep -oP '^([A-Z0-9_]+)_([A-Z0-9_]+)_POOL=' "$SCRIPT_DIR/.env" | while IFS= read -r match; do
+    local varname="${match%=}"
+    local network="${varname%%_*}"
+    local rest="${varname#*_}"
+    local pool_type="${rest%_POOL}"
+    local pool_addr
+    pool_addr=$(grep "^${varname}=" "$SCRIPT_DIR/.env" | cut -d= -f2 | tr -d "'\"")
+    if [[ -n "$pool_addr" ]]; then
+      echo "$network 0 $pool_addr $pool_type"
+    fi
+  done
+}
 
-ALL_NETWORKS=($(grep -oP '^RPC_\K[A-Z0-9_]+(?==)' "$SCRIPT_DIR/.env"))
+# === Parse BGD address book (with .env fallback) ===
 
-if [ "$1" == "--mainnet-only" ]; then
+BGD_CACHE="$LOG_DIR/bgd_address_book.csv"
+BGD_STDERR=$(mktemp)
+POOL_CONFIG=$("$SCRIPT_DIR/parse_address_book.sh" "$BGD_CACHE" 2>"$BGD_STDERR")
+BGD_EXIT=$?
+
+if [[ -s "$BGD_STDERR" ]]; then
+  log_local "BGD parser stderr: $(cat "$BGD_STDERR")"
+fi
+rm -f "$BGD_STDERR"
+
+if [[ $BGD_EXIT -ne 0 ]] || [[ -z "$POOL_CONFIG" ]]; then
+  log_local "BGD parser failed or returned empty; falling back to .env pool entries"
+  POOL_CONFIG=$(env_fallback_pools)
+  if [[ -z "$POOL_CONFIG" ]]; then
+    log_message "BGD parser failed and no *_POOL entries in .env. Cannot proceed."
+    exit 1
+  fi
+fi
+
+# === Network selection ===
+
+mapfile -t ALL_NETWORKS < <(echo "$POOL_CONFIG" | awk '{print $1}' | sort -u)
+
+if [ "${1:-}" == "--mainnet-only" ]; then
   NETWORKS=("MAINNET")
-  log_message "🔄 Starting Dolce Vita Collector (MAINNET only)"
-elif [ "$1" == "--l2s-only" ]; then
+  log_message "Starting Dolce Vita Collector (MAINNET only)"
+elif [ "${1:-}" == "--l2s-only" ]; then
   NETWORKS=()
   for n in "${ALL_NETWORKS[@]}"; do
     [ "$n" != "MAINNET" ] && NETWORKS+=("$n")
   done
-  log_message "🔄 Starting Dolce Vita Collector (${#NETWORKS[@]} L2s)"
+  log_message "Starting Dolce Vita Collector (${#NETWORKS[@]} L2s)"
 else
-  log_message "❌ Invalid or no argument provided. Use --mainnet-only or --l2s-only"
+  log_message "Invalid or no argument provided. Use --mainnet-only or --l2s-only"
   exit 1
 fi
 
-# === Clean broadcast artifacts (reserves are freshly fetched each run) ===
-find "$SCRIPT_DIR/broadcast" -mindepth 1 -delete 2>/dev/null || true
+# === Mint to treasury ===
 
-# === Fetch reserves ===
-log_message "📥 Running make fetch-reserves (parallel, timeout: 600s)"
-timeout 600 make fetch-reserves
-FETCH_RESULT=$?
-
-if [ $FETCH_RESULT -eq 124 ]; then
-  log_message "❌ Error: fetch-reserves timed out after 600 seconds"
-  exit 1
-elif [ $FETCH_RESULT -ne 0 ]; then
-  log_message "❌ Error: fetch-reserves failed (status: $FETCH_RESULT)"
-  exit 1
-else
-  log_message "✅ Reserves fetched successfully"
-fi
-
-# === Check reserves.json ===
-if [ -f "$LOG_DIR/reserves.json" ] && [ -s "$LOG_DIR/reserves.json" ]; then
-  log_message "✅ reserves.json exists and is not empty"
-else
-  log_message "❌ Error: reserves.json is missing or empty"
-  exit 1
-fi
-
-# === Mint to treasury for each network ===
-MAX_RETRIES=3
-DELAY_BETWEEN=8
+TOTAL_POOLS=0
 
 for network in "${NETWORKS[@]}"; do
-  log_local "Starting mint for $network"
+  RPC_VAR="RPC_${network}"
+  RPC_URL="${!RPC_VAR:-}"
 
-  success=false
-  for attempt in $(seq 1 $MAX_RETRIES); do
-    MINT_OUTPUT=$(timeout 180 make mint NETWORK="$network" 2>&1)
-    MINT_EXIT=$?
-
-    if [ $MINT_EXIT -eq 0 ]; then
-      TX_HASH=$(get_tx_hash "$network")
-      if [ -n "$TX_HASH" ]; then
-        TX_HASHES[$network]="$TX_HASH"
-      fi
-      SUCCESS_NETWORKS+=("$network")
-      log_local "Mint succeeded for $network${TX_HASH:+ : $TX_HASH} (attempt $attempt)"
-      success=true
-      break
-    fi
-
-    if [ $attempt -lt $MAX_RETRIES ]; then
-      BACKOFF=$((DELAY_BETWEEN * attempt))
-      log_local "Mint failed for $network (attempt $attempt/$MAX_RETRIES), retrying in ${BACKOFF}s..."
-      sleep $BACKOFF
-    fi
-  done
-
-  if [ "$success" = false ]; then
-    if [ $MINT_EXIT -eq 124 ]; then
-      TIMEOUT_NETWORKS+=("$network")
-      log_message "⏰ $network: Timeout after $MAX_RETRIES attempts"
-    else
-      FAILED_NETWORKS+=("$network")
-      ERROR_MSG=$(echo "$MINT_OUTPUT" | grep -i "error\|revert\|fail" | tail -1)
-      log_local "Mint failed for $network after $MAX_RETRIES attempts: $MINT_OUTPUT"
-      log_message "❌ $network: Failed after $MAX_RETRIES attempts${ERROR_MSG:+ - $ERROR_MSG}"
-    fi
+  if [[ -z "$RPC_URL" ]]; then
+    log_local "Skipping $network: no RPC_${network} in .env"
+    continue
   fi
 
-  # Throttle between chains to avoid Alchemy rate limits
+  LEGACY_FLAG=""
+  if is_legacy "$network"; then
+    LEGACY_FLAG="--legacy"
+  fi
+
+  while IFS=' ' read -r _net _chain pool_addr pool_type; do
+    POOL_LABEL="${network}/${pool_type}"
+    TOTAL_POOLS=$((TOTAL_POOLS + 1))
+
+    log_local "Starting mint for $POOL_LABEL ($pool_addr)"
+
+    success=false
+    MINT_EXIT=0
+    MINT_OUTPUT=""
+
+    for attempt in $(seq 1 $MAX_RETRIES); do
+      MINT_OUTPUT=$(timeout "$MINT_TIMEOUT" "$SCRIPT_DIR/mint_via_cast.sh" "$RPC_URL" "$pool_addr" "$KEYFILE" $LEGACY_FLAG 2>&1)
+      MINT_EXIT=$?
+
+      if [[ $MINT_EXIT -eq 0 ]]; then
+        if [[ "$MINT_OUTPUT" == OK:* ]]; then
+          TX_HASH="${MINT_OUTPUT#OK:}"
+          TX_HASHES[$POOL_LABEL]="$TX_HASH"
+          SUCCESS_POOLS+=("$POOL_LABEL")
+          log_local "Mint succeeded for $POOL_LABEL: $TX_HASH (attempt $attempt)"
+        elif [[ "$MINT_OUTPUT" == SKIP:* ]]; then
+          SKIPPED_POOLS+=("$POOL_LABEL")
+          log_local "Mint skipped for $POOL_LABEL: $MINT_OUTPUT"
+        else
+          log_local "WARNING: unexpected output from mint_via_cast.sh for $POOL_LABEL: $MINT_OUTPUT"
+          SUCCESS_POOLS+=("$POOL_LABEL")
+        fi
+        success=true
+        break
+      fi
+
+      if [ $attempt -lt $MAX_RETRIES ]; then
+        BACKOFF=$((DELAY_BETWEEN * attempt))
+        log_local "Mint failed for $POOL_LABEL (attempt $attempt/$MAX_RETRIES), retrying in ${BACKOFF}s..."
+        sleep $BACKOFF
+      fi
+    done
+
+    if [ "$success" = false ]; then
+      if [ $MINT_EXIT -eq 124 ]; then
+        TIMEOUT_POOLS+=("$POOL_LABEL")
+        log_message "$POOL_LABEL: Timeout after $MAX_RETRIES attempts"
+      else
+        FAILED_POOLS+=("$POOL_LABEL")
+        ERROR_MSG=$(echo "$MINT_OUTPUT" | grep -i "error\|revert\|fail" | tail -1)
+        log_local "Mint failed for $POOL_LABEL after $MAX_RETRIES attempts: $MINT_OUTPUT"
+        log_message "$POOL_LABEL: Failed after $MAX_RETRIES attempts${ERROR_MSG:+ - $ERROR_MSG}"
+      fi
+    fi
+
+  done < <(echo "$POOL_CONFIG" | grep "^${network} ")
+
   sleep $DELAY_BETWEEN
 done
 
 # === Summary Report ===
-TOTAL=${#NETWORKS[@]}
-SUCCESS_COUNT=${#SUCCESS_NETWORKS[@]}
-FAILED_COUNT=${#FAILED_NETWORKS[@]}
-TIMEOUT_COUNT=${#TIMEOUT_NETWORKS[@]}
 
-SUMMARY="🏁 <b>Dolce Vita Collector Complete</b>
+SUCCESS_COUNT=${#SUCCESS_POOLS[@]}
+FAILED_COUNT=${#FAILED_POOLS[@]}
+TIMEOUT_COUNT=${#TIMEOUT_POOLS[@]}
+SKIPPED_COUNT=${#SKIPPED_POOLS[@]}
 
-📊 Results: $SUCCESS_COUNT/$TOTAL succeeded"
+SUMMARY="<b>Dolce Vita Collector Complete</b>
+
+Results: $SUCCESS_COUNT/$TOTAL_POOLS succeeded"
+
+if [ $SKIPPED_COUNT -gt 0 ]; then
+  SUMMARY+=$'\n'"Skipped (no reserves): $SKIPPED_COUNT"
+fi
 
 if [ $FAILED_COUNT -gt 0 ]; then
-  SUMMARY+=$'\n'"❌ Failed: ${FAILED_NETWORKS[*]}"
+  SUMMARY+=$'\n'"Failed: ${FAILED_POOLS[*]}"
 fi
 
 if [ $TIMEOUT_COUNT -gt 0 ]; then
-  SUMMARY+=$'\n'"⏰ Timeout: ${TIMEOUT_NETWORKS[*]}"
+  SUMMARY+=$'\n'"Timeout: ${TIMEOUT_POOLS[*]}"
 fi
 
 if [ $SUCCESS_COUNT -gt 0 ] && [ ${#TX_HASHES[@]} -gt 0 ]; then
-  SUMMARY+=$'\n\n'"✅ Successful:"
-  for network in "${SUCCESS_NETWORKS[@]}"; do
-    if [ -n "${TX_HASHES[$network]}" ]; then
-      SHORT_HASH="${TX_HASHES[$network]:0:10}..."
-      SUMMARY+=$'\n'"• $network: <code>$SHORT_HASH</code>"
+  SUMMARY+=$'\n\n'"Successful:"
+  for pool_label in "${SUCCESS_POOLS[@]}"; do
+    if [ -n "${TX_HASHES[$pool_label]:-}" ]; then
+      SHORT_HASH="${TX_HASHES[$pool_label]:0:10}..."
+      SUMMARY+=$'\n'"- $pool_label: <code>$SHORT_HASH</code>"
     fi
   done
 fi
 
+if [ ${#SUMMARY} -gt 4000 ]; then
+  SUMMARY="${SUMMARY:0:3990}
+...(truncated)"
+fi
+
 log_message "$SUMMARY"
 
-# Exit 0 on partial failures (summary already sent via Telegram)
-# Exit 1 only if ALL networks failed (total infrastructure issue)
-if [ $SUCCESS_COUNT -eq 0 ]; then
+if [ $SUCCESS_COUNT -eq 0 ] && [ $SKIPPED_COUNT -eq 0 ]; then
   exit 1
 fi
